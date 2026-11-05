@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stazione Meteo Domestica</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 20px;
+  background: #101827;
+  color: white;
+  font-family: Arial, sans-serif;
+}
+.container { max-width: 650px; margin: auto; }
+h1 { text-align: center; font-size: 23px; }
+.status { text-align: center; color: #55d69e; margin: 12px; }
+.main {
+  background: #1d2b40;
+  padding: 25px;
+  border-radius: 18px;
+  text-align: center;
+  margin-bottom: 15px;
+}
+.temperature { font-size: 65px; font-weight: bold; }
+.subtitle { color: #aab8cc; }
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.card {
+  background: #1d2b40;
+  padding: 17px 8px;
+  border-radius: 14px;
+  text-align: center;
+}
+.value { font-size: 25px; font-weight: bold; margin: 8px 0; }
+.chart {
+  background: #1d2b40;
+  border-radius: 16px;
+  padding: 15px;
+  margin-top: 18px;
+}
+canvas { max-width: 100%; }
+.footer {
+  text-align: center;
+  color: #aab8cc;
+  font-size: 12px;
+  margin-top: 20px;
+}
+@media(max-width:380px) {
+  body { padding: 10px; }
+  .temperature { font-size: 52px; }
+  .card { padding: 12px 4px; }
+  .value { font-size: 21px; }
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>🌡️ STAZIONE METEO DOMESTICA</h1>
+<div class="status">● Monitoraggio online</div>
+
+<div class="main">
+  <div class="subtitle">TEMPERATURA ATTUALE</div>
+  <div class="temperature" id="temp">--.- °C</div>
+  <div class="subtitle" id="updated">In attesa dei dati...</div>
+</div>
+
+<div class="cards">
+  <div class="card">
+    💧
+    <div class="value" id="humidity">-- %</div>
+    <div class="subtitle">Umidità</div>
+  </div>
+  <div class="card">
+    🔵
+    <div class="value" id="min">-- °C</div>
+    <div class="subtitle">Minima</div>
+  </div>
+  <div class="card">
+    🔴
+    <div class="value" id="max">-- °C</div>
+    <div class="subtitle">Massima</div>
+  </div>
+</div>
+
+<div class="chart">
+  <h3>Andamento temperatura</h3>
+  <canvas id="chart"></canvas>
+</div>
+
+<div class="footer">
+  Dati aggiornati automaticamente da ThingSpeak<br>
+  Canale 3567553
+</div>
+
+</div>
+
+<script>
+const CHANNEL = "3567553";
+const BASE = "https://api.thingspeak.com/channels/" + CHANNEL;
+
+const chart = new Chart(
+  document.getElementById("chart"), {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [{
+        label: "Temperatura °C",
+        data: [],
+        borderColor: "#42bdf5",
+        backgroundColor: "rgba(66,189,245,0.15)",
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: "white" } }
+      },
+      scales: {
+        x: {
+          ticks: { color: "#aab8cc", maxTicksLimit: 6 },
+          grid: { color: "#34445a" }
+        },
+        y: {
+          ticks: { color: "#aab8cc" },
+          grid: { color: "#34445a" }
+        }
+      }
+    }
+  }
+);
+
+async function aggiorna() {
+  try {
+    const response = await fetch(BASE + "/feeds/last.json");
+    if (!response.ok) throw new Error("Dati non disponibili");
+
+    const d = await response.json();
+
+    document.getElementById("temp").textContent =
+      Number(d.field1).toFixed(1) + " °C";
+
+    document.getElementById("humidity").textContent =
+      Number(d.field2).toFixed(1) + " %";
+
+    document.getElementById("min").textContent =
+      Number(d.field3).toFixed(1) + " °C";
+
+    document.getElementById("max").textContent =
+      Number(d.field4).toFixed(1) + " °C";
+
+    document.getElementById("updated").textContent =
+      "Ultimo aggiornamento: " +
+      new Date(d.created_at).toLocaleTimeString("it-IT");
+
+    const storico = await fetch(BASE + "/feeds.json?results=100");
+    if (!storico.ok) throw new Error("Storico non disponibile");
+
+    const dati = await storico.json();
+
+    chart.data.labels = dati.feeds.map(x =>
+      new Date(x.created_at).toLocaleTimeString("it-IT",
+        {hour: "2-digit", minute: "2-digit"})
+    );
+
+    chart.data.datasets[0].data =
+      dati.feeds.map(x => x.field1 === null ? null : Number(x.field1));
+
+    chart.update();
+
+  } catch (e) {
+    document.getElementById("updated").textContent =
+      "Connessione ai dati non disponibile";
+    console.error(e);
+  }
+}
+
+aggiorna();
+setInterval(aggiorna, 20000);
+</script>
+</body>
+</html>
