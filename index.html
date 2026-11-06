@@ -1,11 +1,15 @@
-
 <!DOCTYPE html>
 <html lang="it">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stazione Meteo Domestica</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Ordine importante: prima Chart.js, poi Luxon, poi l'adattatore, e solo dopo lo script che crea il grafico -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/luxon@3"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"></script>
+
 <style>
 * { box-sizing: border-box; }
 body {
@@ -101,6 +105,9 @@ canvas { max-width: 100%; }
 const CHANNEL = "3567553";
 const BASE = "https://api.thingspeak.com/channels/" + CHANNEL;
 
+// Dopo quanti minuti senza nuovi dati l'Arduino viene considerato "non aggiornato"
+const MINUTI_DATI_VECCHI = 5;
+
 const chart = new Chart(document.getElementById("chart"), {
   type: "line",
   data: {
@@ -127,7 +134,7 @@ const chart = new Chart(document.getElementById("chart"), {
         type: "time",
         time: {
           tooltipFormat: "dd/MM HH:mm",
-          displayFormats: { hour: "HH:mm" }
+          displayFormats: { hour: "HH:mm", minute: "HH:mm" }
         },
         ticks: { color: "#aab8cc", maxTicksLimit: 8 },
         grid: { color: "#34445a" }
@@ -145,13 +152,6 @@ const chart = new Chart(document.getElementById("chart"), {
   }
 });
 
-// Plugin per asse temporale Chart.js
-</script>
-
-<script src="https://cdn.jsdelivr.net/npm/luxon@3"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"></script>
-
-<script>
 async function aggiornaUltimo() {
   const response = await fetch(BASE + "/feeds/last.json", {
     cache: "no-store"
@@ -160,7 +160,8 @@ async function aggiornaUltimo() {
 
   const d = await response.json();
 
-  if (d.field1 === null || d.field2 === null) {
+  // == null intercetta sia null sia undefined
+  if (d.field1 == null || d.field2 == null) {
     throw new Error("Dati incompleti");
   }
 
@@ -170,19 +171,30 @@ async function aggiornaUltimo() {
   document.getElementById("humidity").textContent =
     Number(d.field2).toFixed(1) + " %";
 
+  const dataRilevazione = new Date(d.created_at);
+
   document.getElementById("updated").textContent =
     "Ultima rilevazione: " +
-    new Date(d.created_at).toLocaleTimeString("it-IT");
+    dataRilevazione.toLocaleTimeString("it-IT");
 
-  document.getElementById("status").textContent =
-    "● Monitoraggio online";
+  // Controllo se i dati sono recenti
+  const minutiPassati = (Date.now() - dataRilevazione.getTime()) / 60000;
+  const status = document.getElementById("status");
 
-  document.getElementById("status").style.color = "#55d69e";
+  if (minutiPassati > MINUTI_DATI_VECCHI) {
+    status.textContent =
+      "● Dati non aggiornati (ultimo invio " +
+      Math.round(minutiPassati) + " min fa)";
+    status.style.color = "#ffb347";
+  } else {
+    status.textContent = "● Monitoraggio online";
+    status.style.color = "#55d69e";
+  }
 }
 
 async function aggiornaStorico() {
-  // 8000 rilevazioni coprono circa 44 ore
-  const response = await fetch(BASE + "/feeds.json?results=8000", {
+  // days=1 restituisce le ultime 24 ore (massimo 8000 rilevazioni)
+  const response = await fetch(BASE + "/feeds.json?days=1", {
     cache: "no-store"
   });
 
@@ -198,7 +210,7 @@ async function aggiornaStorico() {
   const oggi = new Date().toLocaleDateString("it-IT");
 
   const rilevazioni = feeds
-    .filter(x => x.field1 !== null && x.created_at)
+    .filter(x => x.field1 != null && x.created_at)
     .map(x => ({
       x: new Date(x.created_at).getTime(),
       y: Number(x.field1)
@@ -213,11 +225,15 @@ async function aggiornaStorico() {
     .map(x => x.y);
 
   if (valoriOggi.length > 0) {
-    document.getElementById("min").textContent =
-      Math.min(...valoriOggi).toFixed(1) + " °C";
-
-    document.getElementById("max").textContent =
-      Math.max(...valoriOggi).toFixed(1) + " °C";
+    // Ciclo al posto di Math.min(...array) per evitare problemi con array grandi
+    let min = valoriOggi[0];
+    let max = valoriOggi[0];
+    for (const v of valoriOggi) {
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    document.getElementById("min").textContent = min.toFixed(1) + " °C";
+    document.getElementById("max").textContent = max.toFixed(1) + " °C";
   } else {
     document.getElementById("min").textContent = "-- °C";
     document.getElementById("max").textContent = "-- °C";
